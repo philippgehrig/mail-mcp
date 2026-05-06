@@ -41,7 +41,8 @@ All configuration via environment variables:
 | `MAIL_FROM` | no | `MAIL_USER` | Default From address |
 | `SENT_FOLDER` | no | `send-via-mcp` | IMAP folder for saving sent messages |
 | `TRASH_FOLDER` | no | auto-detect | Trash folder (auto-detected via IMAP SPECIAL-USE `\Trash`, override if needed) |
-| `ATTACHMENTS_DIR` | no | — | If set, restricts outgoing attachments to files within this directory |
+| `ATTACHMENTS_DIR` | no | — | Required for attachments; restricts file paths to this directory |
+| `ALLOW_UNRESTRICTED_ATTACHMENTS` | no | `false` | Set to `true` to allow attachments from any readable path (use with caution) |
 
 Authentication: plain username + password (suitable for self-hosted servers like poste.io).
 
@@ -62,7 +63,7 @@ Authentication: plain username + password (suitable for self-hosted servers like
 | Tool | Inputs | Effect |
 |------|--------|--------|
 | `move_message` | `folder`, `uid`, `destination` | Moves message to destination folder |
-| `delete_message` | `folder`, `uid` | Moves to Trash folder (permanent delete via `\Deleted` flag + EXPUNGE if already in Trash) |
+| `delete_message` | `folder`, `uid` | Moves to Trash folder (permanent delete via UID EXPUNGE if already in Trash) |
 | `mark_message` | `folder`, `uid`, `flags` (object: `{ seen?, flagged? }`) | Sets/unsets message flags |
 
 ### Sending
@@ -79,11 +80,11 @@ All outgoing emails (send, reply, forward) are appended to the IMAP folder speci
 
 ### Trash Folder Discovery
 
-The Trash folder is discovered via IMAP SPECIAL-USE attributes (`\Trash`). If auto-detection fails (server doesn't support SPECIAL-USE), falls back to the `TRASH_FOLDER` env var, then common names (`Trash`, `Deleted Items`). Permanent deletion (when message is already in Trash) uses the `\Deleted` flag followed by EXPUNGE.
+The Trash folder is discovered via IMAP SPECIAL-USE attributes (`\Trash`). If auto-detection fails (server doesn't support SPECIAL-USE), falls back to the `TRASH_FOLDER` env var, then common names (`Trash`, `Deleted Items`). Permanent deletion (when message is already in Trash) uses UID EXPUNGE (RFC 4315) via imapflow's `messageDelete()` to target only the specific message, avoiding unintended removal of other `\Deleted`-flagged messages in the mailbox.
 
 ### Attachment Security
 
-When `ATTACHMENTS_DIR` is set, outgoing attachment file paths are validated to be within that directory (preventing path traversal). When unset, any readable file path is allowed — the user accepts responsibility since Claude Code already requires approval for every tool call.
+Outgoing attachments require `ATTACHMENTS_DIR` to be set. File paths are validated to be within that directory (preventing path traversal). If `ATTACHMENTS_DIR` is not configured, attachment-based sends will fail with an error instructing the user to configure it. To explicitly opt out of path restrictions (at your own risk), set `ALLOW_UNRESTRICTED_ATTACHMENTS=true` — this is necessary because MCP clients other than Claude Code may auto-approve tool calls without user confirmation.
 
 ## Email Body Handling
 
@@ -98,7 +99,7 @@ All diagnostic logging goes to **stderr only** — stdout is reserved for the MC
 - **Network timeouts:** Return user-friendly error suggesting retry
 - **Disconnection during tool call:** Return error indicating temporary disconnection
 
-## Project Structure
+## Project Structure (Target)
 
 ```
 mail-mcp/
