@@ -39,6 +39,9 @@ All configuration via environment variables:
 | `MAIL_USER` | yes | — | Login username |
 | `MAIL_PASSWORD` | yes | — | Login password |
 | `MAIL_FROM` | no | `MAIL_USER` | Default From address |
+| `SENT_FOLDER` | no | `send-via-mcp` | IMAP folder for saving sent messages |
+| `TRASH_FOLDER` | no | auto-detect | Trash folder (auto-detected via IMAP SPECIAL-USE `\Trash`, override if needed) |
+| `ATTACHMENTS_DIR` | no | — | If set, restricts outgoing attachments to files within this directory |
 
 Authentication: plain username + password (suitable for self-hosted servers like poste.io).
 
@@ -49,7 +52,7 @@ Authentication: plain username + password (suitable for self-hosted servers like
 | Tool | Inputs | Returns |
 |------|--------|---------|
 | `list_folders` | — | Array of `{ name, path, delimiter, count }` |
-| `list_messages` | `folder` (default: INBOX), `limit` (default: 50), `offset` | Array of `{ id, uid, subject, from, to, date, flags, hasAttachments }` |
+| `list_messages` | `folder` (default: INBOX), `limit` (default: 50), `offset` | Array of `{ uid, subject, from, to, date, flags, hasAttachments }` |
 | `search_messages` | `folder`, `query` (object with optional `from`, `to`, `subject`, `body`, `since`, `before`, `flagged`, `unseen`) | Same format as `list_messages` |
 | `get_message` | `folder`, `uid` | Full message: headers, plain text body (HTML fallback stripped to text), list of attachments `{ filename, size, contentType, partId }` |
 | `get_attachment` | `folder`, `uid`, `partId` | Base64-encoded file content + filename + contentType |
@@ -59,20 +62,28 @@ Authentication: plain username + password (suitable for self-hosted servers like
 | Tool | Inputs | Effect |
 |------|--------|--------|
 | `move_message` | `folder`, `uid`, `destination` | Moves message to destination folder |
-| `delete_message` | `folder`, `uid` | Moves to Trash (permanent delete if already in Trash) |
+| `delete_message` | `folder`, `uid` | Moves to Trash folder (permanent delete via `\Deleted` flag + EXPUNGE if already in Trash) |
 | `mark_message` | `folder`, `uid`, `flags` (object: `{ seen?, flagged? }`) | Sets/unsets message flags |
 
 ### Sending
 
 | Tool | Inputs | Effect |
 |------|--------|--------|
-| `send_message` | `to`, `subject`, `body`, optional `cc`, `bcc`, `attachments` (file paths) | Sends via SMTP, saves copy to `send-via-mcp` folder |
-| `reply_message` | `folder`, `uid`, `body`, optional `cc`, `bcc`, `replyAll` (boolean) | Replies with correct In-Reply-To/References headers, saves copy to `send-via-mcp` |
-| `forward_message` | `folder`, `uid`, `to`, optional `body` (prepended text) | Forwards with original attachments, saves copy to `send-via-mcp` |
+| `send_message` | `to`, `subject`, `body`, optional `cc`, `bcc`, `attachments` (file paths) | Sends via SMTP, saves copy to sent folder |
+| `reply_message` | `folder`, `uid`, `body`, optional `cc`, `bcc`, `replyAll` (boolean) | Replies with correct In-Reply-To/References headers, saves copy to sent folder |
+| `forward_message` | `folder`, `uid`, `to`, optional `body` (prepended text) | Forwards with original attachments, saves copy to sent folder |
 
 ### Sent Folder Behavior
 
-All outgoing emails (send, reply, forward) are appended to a dedicated `send-via-mcp` IMAP folder. This folder is created automatically if it doesn't exist. This separates MCP-sent mail from manually-sent mail for auditability.
+All outgoing emails (send, reply, forward) are appended to the IMAP folder specified by `SENT_FOLDER` (default: `send-via-mcp`). The folder is created automatically if it doesn't exist. This separates MCP-sent mail from manually-sent mail for auditability. Users who prefer their regular Sent folder can set `SENT_FOLDER=Sent`.
+
+### Trash Folder Discovery
+
+The Trash folder is discovered via IMAP SPECIAL-USE attributes (`\Trash`). If auto-detection fails (server doesn't support SPECIAL-USE), falls back to the `TRASH_FOLDER` env var, then common names (`Trash`, `Deleted Items`). Permanent deletion (when message is already in Trash) uses the `\Deleted` flag followed by EXPUNGE.
+
+### Attachment Security
+
+When `ATTACHMENTS_DIR` is set, outgoing attachment file paths are validated to be within that directory (preventing path traversal). When unset, any readable file path is allowed — the user accepts responsibility since Claude Code already requires approval for every tool call.
 
 ## Email Body Handling
 
@@ -80,8 +91,10 @@ When reading emails, prefer plain text when available. If only HTML exists, stri
 
 ## Error Handling
 
+All diagnostic logging goes to **stderr only** — stdout is reserved for the MCP protocol stream.
+
 - **IMAP/SMTP errors:** Caught and returned as MCP tool error responses (server does not crash)
-- **Auth failures on startup:** Log a clear message and exit (Claude Code surfaces the error)
+- **Auth failures on startup:** Log to stderr and exit with non-zero code (Claude Code surfaces the error)
 - **Network timeouts:** Return user-friendly error suggesting retry
 - **Disconnection during tool call:** Return error indicating temporary disconnection
 
