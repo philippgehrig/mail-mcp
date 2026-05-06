@@ -51,25 +51,33 @@ export class ImapClient {
     limit: number,
     offset: number,
   ): Promise<MessageSummary[]> {
+    const safeLimit = Math.max(1, limit);
+    const safeOffset = Math.max(0, offset);
+
     const lock = await this.client.getMailboxLock(folder);
     try {
       const mailbox = this.client.mailbox;
       const total = mailbox ? mailbox.exists : 0;
       if (total === 0) return [];
 
-      const end = total - offset;
-      const start = Math.max(end - limit + 1, 1);
-      if (end < 1) return [];
+      // Use UID-based pagination: search all UIDs, sort descending, slice
+      const allUids = await this.client.search({ all: true }, { uid: true });
+      if (!allUids || allUids.length === 0) return [];
 
-      const range = `${start}:${end}`;
+      // Sort descending (newest first) and paginate
+      allUids.sort((a, b) => b - a);
+      const paged = allUids.slice(safeOffset, safeOffset + safeLimit);
+      if (paged.length === 0) return [];
+
+      const uidRange = paged.join(",");
       const messages: MessageSummary[] = [];
 
-      for await (const msg of this.client.fetch(range, {
+      for await (const msg of this.client.fetch(uidRange, {
         uid: true,
         flags: true,
         envelope: true,
         bodyStructure: true,
-      })) {
+      }, { uid: true })) {
         const envelope = msg.envelope;
         const from = envelope?.from?.[0];
         const to = envelope?.to?.[0];
@@ -84,8 +92,8 @@ export class ImapClient {
         });
       }
 
-      // Return newest first
-      messages.reverse();
+      // Sort by UID descending (newest first)
+      messages.sort((a, b) => b.uid - a.uid);
       return messages;
     } finally {
       lock.release();
@@ -105,10 +113,10 @@ export class ImapClient {
       if (query.to) criteria.to = query.to as string;
       if (query.subject) criteria.subject = query.subject as string;
       if (query.body) criteria.body = query.body as string;
-      if (query.since) criteria.since = query.since as string;
-      if (query.before) criteria.before = query.before as string;
+      if (query.since) criteria.since = new Date(query.since as string);
+      if (query.before) criteria.before = new Date(query.before as string);
       if (query.flagged !== undefined) criteria.flagged = query.flagged as boolean;
-      if (query.seen !== undefined) criteria.seen = query.seen as boolean;
+      if (query.unseen !== undefined) criteria.seen = !(query.unseen as boolean);
 
       const uids = await this.client.search(criteria, { uid: true });
       if (!uids || uids.length === 0) return [];
@@ -147,13 +155,16 @@ export class ImapClient {
   async getMessage(folder: string, uid: number): Promise<FullMessage> {
     const lock = await this.client.getMailboxLock(folder);
     try {
-      // Get flags first
+      // Get flags and bodyStructure first
       let flags: string[] = [];
+      let bodyStructure: unknown = null;
       for await (const msg of this.client.fetch(uid.toString(), {
         uid: true,
         flags: true,
+        bodyStructure: true,
       }, { uid: true })) {
         flags = Array.from(msg.flags || []);
+        bodyStructure = msg.bodyStructure;
       }
 
       // Download full message
@@ -205,12 +216,13 @@ export class ImapClient {
           .join(", ");
       }
 
-      // Build attachments list
-      const attachments: AttachmentInfo[] = (parsed.attachments || []).map((att) => ({
+      // Build attachments list with MIME part IDs from bodyStructure
+      const partIds = this.extractAttachmentPartIds(bodyStructure);
+      const attachments: AttachmentInfo[] = (parsed.attachments || []).map((att, idx) => ({
         filename: att.filename || "unnamed",
         size: att.size,
         contentType: att.contentType || "application/octet-stream",
-        partId: att.contentId || att.checksum || "",
+        partId: partIds[idx] || String(idx + 1),
       }));
 
       // References
@@ -345,6 +357,32 @@ export class ImapClient {
 
     // 4. Fallback
     return "Trash";
+  }
+
+  private extractAttachmentPartIds(structure: unknown, prefix = ""): string[] {
+    const partIds: string[] = [];
+    if (!structure || typeof structure !== "object") return partIds;
+
+    const s = structure as Record<string, unknown>;
+
+    if (s.disposition === "attachment") {
+      partIds.push(s.part as string || prefix || "1");
+    }
+
+    if (Array.isArray(s.childNodes)) {
+      for (let i = 0; i < s.childNodes.length; i++) {
+        const childPrefix = prefix ? `${prefix}.${i + 1}` : String(i + 1);
+        const child = s.childNodes[i] as Record<string, unknown>;
+        const childPart = (child.part as string) || childPrefix;
+        if (child.disposition === "attachment") {
+          partIds.push(childPart);
+        } else {
+          partIds.push(...this.extractAttachmentPartIds(child, childPrefix));
+        }
+      }
+    }
+
+    return partIds;
   }
 
   private hasAttachments(structure: unknown): boolean {
