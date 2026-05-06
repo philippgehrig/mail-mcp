@@ -44,21 +44,35 @@ export class SmtpClient {
       );
     }
 
-    const resolvedDir = path.resolve(this.config.attachmentsDir);
+    const resolvedDir = fs.realpathSync(path.resolve(this.config.attachmentsDir));
 
     for (const filePath of paths) {
       const resolvedPath = path.resolve(filePath);
 
-      // Prevent path traversal
-      if (!resolvedPath.startsWith(resolvedDir + path.sep) && resolvedPath !== resolvedDir) {
+      // Check file exists before resolving symlinks
+      if (!fs.existsSync(resolvedPath)) {
+        throw new Error(`Attachment file not found: "${filePath}"`);
+      }
+
+      // Resolve symlinks to get real path
+      const realPath = fs.realpathSync(resolvedPath);
+
+      // Reject the directory itself
+      if (realPath === resolvedDir) {
+        throw new Error(`Attachment path "${filePath}" is a directory, not a file`);
+      }
+
+      // Prevent path traversal (check real path after symlink resolution)
+      if (!realPath.startsWith(resolvedDir + path.sep)) {
         throw new Error(
-          `Attachment path "${filePath}" is outside the allowed directory "${resolvedDir}"`,
+          `Attachment path "${filePath}" resolves outside the allowed directory "${resolvedDir}"`,
         );
       }
 
-      // Check file exists
-      if (!fs.existsSync(resolvedPath)) {
-        throw new Error(`Attachment file not found: "${filePath}"`);
+      // Verify it's a regular file
+      const stat = fs.statSync(realPath);
+      if (!stat.isFile()) {
+        throw new Error(`Attachment path "${filePath}" is not a regular file`);
       }
     }
   }
@@ -75,7 +89,7 @@ export class SmtpClient {
   private async appendToSentFolder(
     imapClient: ImapClient,
     raw: Buffer | string,
-  ): Promise<void> {
+  ): Promise<string | null> {
     const folderName = this.config.sentFolder;
     const client = imapClient.getClient();
 
@@ -94,8 +108,11 @@ export class SmtpClient {
       // Append message with \Seen flag
       await client.append(folderName, raw, ["\\Seen"]);
       console.error(`Message appended to ${folderName}`);
+      return null;
     } catch (err) {
-      console.error(`Failed to append to sent folder: ${err}`);
+      const message = `Failed to append to sent folder: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(message);
+      return message;
     }
   }
 
@@ -151,7 +168,7 @@ export class SmtpClient {
     let to: string;
     if (options.replyAll) {
       // Reply all: original from + all to/cc, excluding self
-      const selfAddress = this.config.mailFrom.toLowerCase();
+      const selfAddress = this.extractEmailAddress(this.config.mailFrom);
       const allRecipients = new Set<string>();
 
       if (original.from) {
@@ -164,11 +181,13 @@ export class SmtpClient {
         original.cc.split(",").forEach((addr) => allRecipients.add(addr.trim()));
       }
 
-      // Remove self from recipients
+      // Remove self from recipients (compare extracted email addresses)
       const filtered = Array.from(allRecipients).filter(
-        (addr) => !addr.toLowerCase().includes(selfAddress),
+        (addr) => this.extractEmailAddress(addr) !== selfAddress,
       );
-      to = filtered.join(", ");
+
+      // Fall back to original sender if filtering removed everyone
+      to = filtered.length > 0 ? filtered.join(", ") : original.from;
     } else {
       to = original.from;
     }
@@ -296,6 +315,11 @@ export class SmtpClient {
     }
 
     return info.messageId;
+  }
+
+  private extractEmailAddress(addr: string): string {
+    const match = addr.match(/<([^>]+)>/);
+    return (match ? match[1] : addr).toLowerCase().trim();
   }
 
   getConfig(): Config {
