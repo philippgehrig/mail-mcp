@@ -2,6 +2,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ImapClient } from "../imap.js";
 
+function errorResponse(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
+}
+
 export function registerMessageTools(
   server: McpServer,
   imapClient: ImapClient,
@@ -20,10 +25,14 @@ export function registerMessageTools(
       },
     },
     async ({ folder, limit, offset }) => {
-      const messages = await imapClient.listMessages(folder, limit, offset);
-      return {
-        content: [{ type: "text", text: JSON.stringify(messages, null, 2) }],
-      };
+      try {
+        const messages = await imapClient.listMessages(folder, limit, offset);
+        return {
+          content: [{ type: "text", text: JSON.stringify(messages, null, 2) }],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 
@@ -50,10 +59,14 @@ export function registerMessageTools(
       },
     },
     async ({ folder, ...query }) => {
-      const messages = await imapClient.searchMessages(folder, query);
-      return {
-        content: [{ type: "text", text: JSON.stringify(messages, null, 2) }],
-      };
+      try {
+        const messages = await imapClient.searchMessages(folder, query);
+        return {
+          content: [{ type: "text", text: JSON.stringify(messages, null, 2) }],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 
@@ -67,10 +80,14 @@ export function registerMessageTools(
       },
     },
     async ({ folder, uid }) => {
-      const message = await imapClient.getMessage(folder, uid);
-      return {
-        content: [{ type: "text", text: JSON.stringify(message, null, 2) }],
-      };
+      try {
+        const message = await imapClient.getMessage(folder, uid);
+        return {
+          content: [{ type: "text", text: JSON.stringify(message, null, 2) }],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 
@@ -85,10 +102,14 @@ export function registerMessageTools(
       },
     },
     async ({ folder, uid, partId }) => {
-      const attachment = await imapClient.getAttachment(folder, uid, partId);
-      return {
-        content: [{ type: "text", text: JSON.stringify(attachment, null, 2) }],
-      };
+      try {
+        const attachment = await imapClient.getAttachment(folder, uid, partId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(attachment, null, 2) }],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 }

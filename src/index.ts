@@ -30,7 +30,7 @@ async function main() {
   console.error("mail-mcp server started");
 }
 
-main().catch((err) => {
-  console.error("Failed to start mail-mcp server:", err.message);
+main().catch((err: unknown) => {
+  console.error("Failed to start mail-mcp server:", err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

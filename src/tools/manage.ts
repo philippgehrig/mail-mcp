@@ -2,6 +2,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ImapClient } from "../imap.js";
 
+function errorResponse(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
+}
+
 export function registerManageTools(
   server: McpServer,
   imapClient: ImapClient,
@@ -17,12 +22,16 @@ export function registerManageTools(
       },
     },
     async ({ folder, uid, destination }) => {
-      await imapClient.moveMessage(folder, uid, destination);
-      return {
-        content: [
-          { type: "text", text: `Message ${uid} moved to ${destination}` },
-        ],
-      };
+      try {
+        await imapClient.moveMessage(folder, uid, destination);
+        return {
+          content: [
+            { type: "text", text: `Message ${uid} moved to ${destination}` },
+          ],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 
@@ -37,10 +46,14 @@ export function registerManageTools(
       },
     },
     async ({ folder, uid }) => {
-      await imapClient.deleteMessage(folder, uid);
-      return {
-        content: [{ type: "text", text: `Message ${uid} deleted` }],
-      };
+      try {
+        await imapClient.deleteMessage(folder, uid);
+        return {
+          content: [{ type: "text", text: `Message ${uid} deleted` }],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 
@@ -56,10 +69,14 @@ export function registerManageTools(
       },
     },
     async ({ folder, uid, seen, flagged }) => {
-      await imapClient.markMessage(folder, uid, { seen, flagged });
-      return {
-        content: [{ type: "text", text: `Message ${uid} flags updated` }],
-      };
+      try {
+        await imapClient.markMessage(folder, uid, { seen, flagged });
+        return {
+          content: [{ type: "text", text: `Message ${uid} flags updated` }],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 }

@@ -28,6 +28,17 @@ export function loadConfig(): Config {
     return val;
   };
 
+  const parsePort = (name: string, defaultValue: number): number => {
+    const raw = process.env[name];
+    if (!raw) return defaultValue;
+    const port = parseInt(raw, 10);
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      console.error(`Invalid port for ${name}: "${raw}" (must be 1-65535)`);
+      process.exit(1);
+    }
+    return port;
+  };
+
   const imapHost = required("IMAP_HOST");
   const smtpHost = required("SMTP_HOST");
   const mailUser = required("MAIL_USER");
@@ -36,11 +47,11 @@ export function loadConfig(): Config {
   return {
     imap: {
       host: imapHost,
-      port: parseInt(process.env.IMAP_PORT || "993", 10),
+      port: parsePort("IMAP_PORT", 993),
     },
     smtp: {
       host: smtpHost,
-      port: parseInt(process.env.SMTP_PORT || "587", 10),
+      port: parsePort("SMTP_PORT", 587),
     },
     auth: {
       user: mailUser,

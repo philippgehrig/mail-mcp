@@ -3,6 +3,11 @@ import { z } from "zod";
 import { ImapClient } from "../imap.js";
 import { SmtpClient } from "../smtp.js";
 
+function errorResponse(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
+}
+
 export function registerSendTools(
   server: McpServer,
   imapClient: ImapClient,
@@ -27,21 +32,25 @@ export function registerSendTools(
       },
     },
     async ({ to, subject, body, cc, bcc, attachments }) => {
-      const messageId = await smtpClient.sendMessage(
-        to,
-        subject,
-        body,
-        { cc, bcc, attachments },
-        imapClient,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Email sent to ${to} (Message-ID: ${messageId})`,
-          },
-        ],
-      };
+      try {
+        const messageId = await smtpClient.sendMessage(
+          to,
+          subject,
+          body,
+          { cc, bcc, attachments },
+          imapClient,
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Email sent to ${to} (Message-ID: ${messageId})`,
+            },
+          ],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 
@@ -62,18 +71,22 @@ export function registerSendTools(
       },
     },
     async ({ folder, uid, body, cc, bcc, replyAll }) => {
-      const messageId = await smtpClient.replyMessage(
-        folder,
-        uid,
-        body,
-        { cc, bcc, replyAll },
-        imapClient,
-      );
-      return {
-        content: [
-          { type: "text", text: `Reply sent (Message-ID: ${messageId})` },
-        ],
-      };
+      try {
+        const messageId = await smtpClient.replyMessage(
+          folder,
+          uid,
+          body,
+          { cc, bcc, replyAll },
+          imapClient,
+        );
+        return {
+          content: [
+            { type: "text", text: `Reply sent (Message-ID: ${messageId})` },
+          ],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 
@@ -91,21 +104,25 @@ export function registerSendTools(
       },
     },
     async ({ folder, uid, to, body }) => {
-      const messageId = await smtpClient.forwardMessage(
-        folder,
-        uid,
-        to,
-        { body },
-        imapClient,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Message forwarded to ${to} (Message-ID: ${messageId})`,
-          },
-        ],
-      };
+      try {
+        const messageId = await smtpClient.forwardMessage(
+          folder,
+          uid,
+          to,
+          { body },
+          imapClient,
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Message forwarded to ${to} (Message-ID: ${messageId})`,
+            },
+          ],
+        };
+      } catch (err) {
+        return errorResponse(err);
+      }
     },
   );
 }
