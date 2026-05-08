@@ -6,10 +6,16 @@ An MCP (Model Context Protocol) server that gives Claude access to your email vi
 
 ### Claude Code Plugin (recommended)
 
-Install as a plugin from the marketplace:
+First, add the marketplace source:
 
 ```
-/plugin install philippgehrig/mail-mcp
+/plugin marketplace add philippgehrig/mail-mcp
+```
+
+Then install the plugin:
+
+```
+/plugin install mail@mail-mcp
 ```
 
 You'll be prompted to configure your IMAP/SMTP credentials on first use.
