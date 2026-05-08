@@ -39,11 +39,6 @@ jobs:
           - 3143:3143
         env:
           GREENMAIL_OPTS: "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=test@localhost.com:password123"
-        options: >-
-          --health-cmd "nc -z 127.0.0.1 3143 || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,6 +46,12 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
+      - name: Wait for GreenMail
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/localhost/3143) 2>/dev/null && break
+            sleep 1
+          done
       - run: npm run test:integration
         env:
           IMAP_HOST: localhost
