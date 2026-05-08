@@ -46,16 +46,18 @@ async function pollForMessage(
   throw new Error(`Message not found in ${folder} within ${timeoutMs}ms`);
 }
 
-async function connectWithRetry(client: ImapClient, maxAttempts = 10): Promise<void> {
+async function connectWithRetry(config: Config, maxAttempts = 15): Promise<ImapClient> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const client = new ImapClient(config);
     try {
       await client.connect();
-      return;
+      return client;
     } catch (err) {
       if (attempt === maxAttempts) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
+  throw new Error("Unreachable");
 }
 
 let imapClient: ImapClient;
@@ -65,9 +67,8 @@ let sentMessageUid: number;
 
 describe("Email Integration Tests (GreenMail)", () => {
   beforeAll(async () => {
-    imapClient = new ImapClient(testConfig);
     smtpClient = new SmtpClient(testConfig);
-    await connectWithRetry(imapClient);
+    imapClient = await connectWithRetry(testConfig);
     connected = true;
   });
 
