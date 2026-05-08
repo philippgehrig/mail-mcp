@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -49,9 +48,10 @@ jobs:
       - name: Wait for GreenMail
         run: |
           for i in $(seq 1 30); do
-            (echo > /dev/tcp/localhost/3143) 2>/dev/null && break
+            (echo > /dev/tcp/localhost/3143) 2>/dev/null && (echo > /dev/tcp/localhost/3025) 2>/dev/null && exit 0
             sleep 1
           done
+          echo "GreenMail failed to start" && exit 1
       - run: npm run test:integration
         env:
           IMAP_HOST: localhost
