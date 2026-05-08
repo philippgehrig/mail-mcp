@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "mail": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "env": {
+        "IMAP_HOST": "${user_config.imap_host}",
+        "IMAP_PORT": "${user_config.imap_port}",
+        "SMTP_HOST": "${user_config.smtp_host}",
+        "SMTP_PORT": "${user_config.smtp_port}",
+        "MAIL_USER": "${user_config.mail_user}",
+        "MAIL_PASSWORD": "${user_config.mail_password}",
+        "MAIL_FROM": "${user_config.mail_from}"
+      }
+    }
+  }
+}
