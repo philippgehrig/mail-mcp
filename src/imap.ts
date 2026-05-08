@@ -24,6 +24,7 @@ export class ImapClient {
         pass: config.auth.pass,
       },
       logger: false,
+      disableCompression: true,
     });
   }
 
@@ -304,8 +305,16 @@ export class ImapClient {
         lock.release();
       }
     } else {
-      // Move to trash
+      await this.ensureFolderExists(trashFolder);
       await this.moveMessage(folder, uid, trashFolder);
+    }
+  }
+
+  private async ensureFolderExists(folderPath: string): Promise<void> {
+    const folders = await this.client.list();
+    const exists = folders.some((f) => f.path === folderPath);
+    if (!exists) {
+      await this.client.mailboxCreate(folderPath);
     }
   }
 

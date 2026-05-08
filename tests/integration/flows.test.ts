@@ -15,10 +15,10 @@ const testConfig: Config = {
     port: parseInt(process.env.SMTP_PORT || "3025", 10),
   },
   auth: {
-    user: process.env.MAIL_USER || "test@localhost.com",
+    user: process.env.MAIL_USER || "test",
     pass: process.env.MAIL_PASSWORD || "password123",
   },
-  mailFrom: process.env.MAIL_USER || "test@localhost.com",
+  mailFrom: process.env.MAIL_FROM || "test@localhost.com",
   sentFolder: "Sent",
   trashFolder: "Trash",
   attachmentsDir: null,
@@ -82,7 +82,7 @@ describe("Email Integration Tests (GreenMail)", () => {
   describe("Sending emails", () => {
     it("should send an email via SMTP", async () => {
       const messageId = await smtpClient.sendMessage(
-        testConfig.auth.user,
+        testConfig.mailFrom,
         SUBJECTS.first,
         "Hello from the integration test suite!",
         {},
@@ -95,7 +95,7 @@ describe("Email Integration Tests (GreenMail)", () => {
 
     it("should send a second email for later tests", async () => {
       const messageId = await smtpClient.sendMessage(
-        testConfig.auth.user,
+        testConfig.mailFrom,
         SUBJECTS.second,
         "This is the second test message.",
         {},
@@ -107,7 +107,7 @@ describe("Email Integration Tests (GreenMail)", () => {
 
     it("should send a third email for delete tests", async () => {
       const messageId = await smtpClient.sendMessage(
-        testConfig.auth.user,
+        testConfig.mailFrom,
         SUBJECTS.delete,
         "This message will be deleted.",
         {},
@@ -299,7 +299,7 @@ describe("Email Integration Tests (GreenMail)", () => {
       const messageId = await smtpClient.forwardMessage(
         "INBOX",
         sentMessageUid,
-        testConfig.auth.user,
+        testConfig.mailFrom,
         { body: "FYI - forwarding this to you." },
         imapClient,
       );
