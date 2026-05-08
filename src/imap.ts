@@ -18,12 +18,13 @@ export class ImapClient {
     this.client = new ImapFlow({
       host: config.imap.host,
       port: config.imap.port,
-      secure: true,
+      secure: config.imap.port === 993,
       auth: {
         user: config.auth.user,
         pass: config.auth.pass,
       },
       logger: false,
+      disableCompression: true,
     });
   }
 
@@ -304,8 +305,16 @@ export class ImapClient {
         lock.release();
       }
     } else {
-      // Move to trash
+      await this.ensureFolderExists(trashFolder);
       await this.moveMessage(folder, uid, trashFolder);
+    }
+  }
+
+  private async ensureFolderExists(folderPath: string): Promise<void> {
+    const folders = await this.client.list();
+    const exists = folders.some((f) => f.path === folderPath);
+    if (!exists) {
+      await this.client.mailboxCreate(folderPath);
     }
   }
 

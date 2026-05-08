@@ -17,6 +17,7 @@ const mockClient = {
   fetch: vi.fn(),
   search: vi.fn(),
   download: vi.fn(),
+  mailboxCreate: vi.fn(),
 };
 
 vi.mock("imapflow", () => ({
@@ -197,6 +198,10 @@ describe("ImapClient", () => {
     it("uses config trashFolder", async () => {
       const configWithTrash = { ...baseConfig, trashFolder: "CustomTrash" };
       const clientWithTrash = new ImapClient(configWithTrash);
+
+      mockClient.list.mockResolvedValue([
+        { name: "CustomTrash", path: "CustomTrash" },
+      ]);
 
       await clientWithTrash.deleteMessage("INBOX", 42);
       expect(mockClient.messageMove).toHaveBeenCalledWith("42", "CustomTrash", { uid: true });
