@@ -5,12 +5,25 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "mail-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    ".claude-plugin",
+    ".mcp.json",
+    "package-lock.json",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts"

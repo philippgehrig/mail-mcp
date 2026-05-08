@@ -2,13 +2,21 @@
 
 An MCP (Model Context Protocol) server that gives Claude access to your email via IMAP and SMTP. Read, search, send, reply, forward, and manage messages directly from Claude Code or any MCP-compatible client.
 
-## Prerequisites
-
-- Node.js >= 20
-- npm
-- An email account with IMAP and SMTP access
-
 ## Installation
+
+### Claude Code Plugin (recommended)
+
+Install as a plugin from the marketplace:
+
+```
+/plugin install philippgehrig/mail-mcp
+```
+
+You'll be prompted to configure your IMAP/SMTP credentials on first use.
+
+### Manual Installation
+
+Requires Node.js >= 20 and an email account with IMAP/SMTP access.
 
 ```bash
 git clone https://github.com/philippgehrig/mail-mcp.git
@@ -17,9 +25,23 @@ npm install
 npm run build
 ```
 
-## Configuration
+Then register with Claude Code:
 
-Set the following environment variables:
+```bash
+claude mcp add-json --scope user mail '{
+  "command": "node",
+  "args": ["/path/to/mail-mcp/dist/index.js"],
+  "env": {
+    "IMAP_HOST": "imap.example.com",
+    "SMTP_HOST": "smtp.example.com",
+    "MAIL_USER": "you@example.com",
+    "MAIL_PASSWORD": "your-app-password",
+    "MAIL_FROM": "you@example.com"
+  }
+}'
+```
+
+## Configuration
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -34,28 +56,6 @@ Set the following environment variables:
 | `TRASH_FOLDER` | No | auto-detect | Trash folder name (auto-detects via SPECIAL-USE) |
 | `ATTACHMENTS_DIR` | No | — | Directory to allow local file attachments from |
 | `ALLOW_UNRESTRICTED_ATTACHMENTS` | No | `false` | Set `true` to allow local file attachments from any path |
-
-## Claude Code MCP Configuration
-
-Add to your Claude Code MCP settings (`~/.claude/settings.json` or project `.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "mail": {
-      "command": "node",
-      "args": ["dist/index.js"],
-      "cwd": "/path/to/mail-mcp",
-      "env": {
-        "IMAP_HOST": "imap.example.com",
-        "SMTP_HOST": "smtp.example.com",
-        "MAIL_USER": "you@example.com",
-        "MAIL_PASSWORD": "your-app-password"
-      }
-    }
-  }
-}
-```
 
 ## Available Tools
 

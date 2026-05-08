@@ -1,0 +1,62 @@
+{
+  "name": "mail",
+  "version": "0.1.0",
+  "description": "IMAP/SMTP email access for Claude Code. Read, search, send, reply, forward, and manage emails directly from Claude.",
+  "author": {
+    "name": "Philipp Gehrig",
+    "url": "https://github.com/philippgehrig"
+  },
+  "repository": "https://github.com/philippgehrig/mail-mcp",
+  "license": "MIT",
+  "keywords": [
+    "mail",
+    "email",
+    "imap",
+    "smtp",
+    "mcp"
+  ],
+  "userConfig": {
+    "imap_host": {
+      "type": "string",
+      "title": "IMAP host",
+      "description": "IMAP server hostname (e.g., imap.gmail.com)",
+      "required": true
+    },
+    "imap_port": {
+      "type": "number",
+      "title": "IMAP port",
+      "description": "IMAP server port",
+      "default": 993
+    },
+    "smtp_host": {
+      "type": "string",
+      "title": "SMTP host",
+      "description": "SMTP server hostname (e.g., smtp.gmail.com)",
+      "required": true
+    },
+    "smtp_port": {
+      "type": "number",
+      "title": "SMTP port",
+      "description": "SMTP server port",
+      "default": 587
+    },
+    "mail_user": {
+      "type": "string",
+      "title": "Email address",
+      "description": "Email account username / address",
+      "required": true
+    },
+    "mail_password": {
+      "type": "string",
+      "title": "Email password",
+      "description": "Email account password or app-specific password",
+      "sensitive": true,
+      "required": true
+    },
+    "mail_from": {
+      "type": "string",
+      "title": "From address",
+      "description": "From address for outgoing mail (defaults to email address)"
+    }
+  }
+}

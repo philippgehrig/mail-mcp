@@ -1,0 +1,15 @@
+{
+  "name": "mail-mcp",
+  "owner": {
+    "name": "Philipp Gehrig",
+    "url": "https://github.com/philippgehrig"
+  },
+  "plugins": [
+    {
+      "name": "mail",
+      "source": "./",
+      "description": "IMAP/SMTP email access for Claude Code",
+      "version": "0.1.0"
+    }
+  ]
+}
