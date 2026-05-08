@@ -322,6 +322,13 @@ export class SmtpClient {
     return (match ? match[1] : addr).toLowerCase().trim();
   }
 
+  close(): void {
+    if (this.transporter) {
+      this.transporter.close();
+      this.transporter = null;
+    }
+  }
+
   getConfig(): Config {
     return this.config;
   }

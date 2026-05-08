@@ -3,58 +3,86 @@ import { ImapClient } from "../../src/imap.js";
 import { SmtpClient } from "../../src/smtp.js";
 import { Config } from "../../src/config.js";
 
-/**
- * Integration tests using GreenMail Docker container.
- *
- * Prerequisites:
- *   docker compose -f tests/integration/docker-compose.yml up -d
- *
- * Run:
- *   npm run test:integration
- */
+const RUN_ID = Date.now().toString(36);
 
 const testConfig: Config = {
   imap: {
-    host: "localhost",
-    port: 3143,
+    host: process.env.IMAP_HOST || "localhost",
+    port: parseInt(process.env.IMAP_PORT || "3143", 10),
   },
   smtp: {
-    host: "localhost",
-    port: 3025,
+    host: process.env.SMTP_HOST || "localhost",
+    port: parseInt(process.env.SMTP_PORT || "3025", 10),
   },
   auth: {
-    user: "test@localhost.com",
-    pass: "password123",
+    user: process.env.MAIL_USER || "test@localhost.com",
+    pass: process.env.MAIL_PASSWORD || "password123",
   },
-  mailFrom: "test@localhost.com",
+  mailFrom: process.env.MAIL_USER || "test@localhost.com",
   sentFolder: "Sent",
   trashFolder: "Trash",
   attachmentsDir: null,
   allowUnrestrictedAttachments: false,
 };
 
+const SUBJECTS = {
+  first: `Test Email ${RUN_ID}`,
+  second: `Second Email ${RUN_ID}`,
+  delete: `Delete Me ${RUN_ID}`,
+};
+
+async function pollForMessage(
+  client: ImapClient,
+  folder: string,
+  predicate: (subject: string) => boolean,
+  timeoutMs = 10000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const messages = await client.listMessages(folder, 50, 0);
+    if (messages.some((m) => predicate(m.subject))) return;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error(`Message not found in ${folder} within ${timeoutMs}ms`);
+}
+
+async function connectWithRetry(client: ImapClient, maxAttempts = 10): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await client.connect();
+      return;
+    } catch (err) {
+      if (attempt === maxAttempts) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+}
+
 let imapClient: ImapClient;
 let smtpClient: SmtpClient;
-
-// Track UIDs for sequential test state
+let connected = false;
 let sentMessageUid: number;
 
 describe("Email Integration Tests (GreenMail)", () => {
   beforeAll(async () => {
     imapClient = new ImapClient(testConfig);
     smtpClient = new SmtpClient(testConfig);
-    await imapClient.connect();
+    await connectWithRetry(imapClient);
+    connected = true;
   });
 
   afterAll(async () => {
-    await imapClient.disconnect();
+    if (connected) {
+      await imapClient.disconnect();
+    }
+    smtpClient.close();
   });
 
   describe("Sending emails", () => {
     it("should send an email via SMTP", async () => {
       const messageId = await smtpClient.sendMessage(
-        "test@localhost.com",
-        "Integration Test Email",
+        testConfig.auth.user,
+        SUBJECTS.first,
         "Hello from the integration test suite!",
         {},
         imapClient,
@@ -66,8 +94,8 @@ describe("Email Integration Tests (GreenMail)", () => {
 
     it("should send a second email for later tests", async () => {
       const messageId = await smtpClient.sendMessage(
-        "test@localhost.com",
-        "Second Test Email",
+        testConfig.auth.user,
+        SUBJECTS.second,
         "This is the second test message.",
         {},
         imapClient,
@@ -78,8 +106,8 @@ describe("Email Integration Tests (GreenMail)", () => {
 
     it("should send a third email for delete tests", async () => {
       const messageId = await smtpClient.sendMessage(
-        "test@localhost.com",
-        "Delete Me",
+        testConfig.auth.user,
+        SUBJECTS.delete,
         "This message will be deleted.",
         {},
         imapClient,
@@ -91,34 +119,28 @@ describe("Email Integration Tests (GreenMail)", () => {
 
   describe("Listing messages", () => {
     it("should list messages in INBOX", async () => {
-      // Brief delay to allow GreenMail to deliver messages
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await pollForMessage(imapClient, "INBOX", (s) => s === SUBJECTS.delete);
 
-      const messages = await imapClient.listMessages("INBOX", 10, 0);
+      const messages = await imapClient.listMessages("INBOX", 50, 0);
 
       expect(messages).toBeDefined();
       expect(messages.length).toBeGreaterThanOrEqual(3);
 
-      // Messages should be sorted newest first
       const subjects = messages.map((m) => m.subject);
-      expect(subjects).toContain("Integration Test Email");
-      expect(subjects).toContain("Second Test Email");
-      expect(subjects).toContain("Delete Me");
+      expect(subjects).toContain(SUBJECTS.first);
+      expect(subjects).toContain(SUBJECTS.second);
+      expect(subjects).toContain(SUBJECTS.delete);
 
-      // Save UID of first message for later tests
-      const firstMsg = messages.find(
-        (m) => m.subject === "Integration Test Email",
-      );
+      const firstMsg = messages.find((m) => m.subject === SUBJECTS.first);
       expect(firstMsg).toBeDefined();
       sentMessageUid = firstMsg!.uid;
     });
 
     it("should respect pagination offset and limit", async () => {
-      const allMessages = await imapClient.listMessages("INBOX", 10, 0);
+      const allMessages = await imapClient.listMessages("INBOX", 50, 0);
       const paginated = await imapClient.listMessages("INBOX", 1, 1);
 
       expect(paginated.length).toBe(1);
-      // The paginated result should be the second message from the full list
       expect(paginated[0].uid).toBe(allMessages[1].uid);
     });
   });
@@ -129,7 +151,7 @@ describe("Email Integration Tests (GreenMail)", () => {
 
       expect(message).toBeDefined();
       expect(message.uid).toBe(sentMessageUid);
-      expect(message.subject).toBe("Integration Test Email");
+      expect(message.subject).toBe(SUBJECTS.first);
       expect(message.from).toContain("test@localhost.com");
       expect(message.to).toContain("test@localhost.com");
       expect(message.body).toContain("Hello from the integration test suite!");
@@ -141,11 +163,11 @@ describe("Email Integration Tests (GreenMail)", () => {
   describe("Searching messages", () => {
     it("should search by subject", async () => {
       const results = await imapClient.searchMessages("INBOX", {
-        subject: "Second Test",
+        subject: SUBJECTS.second,
       });
 
       expect(results.length).toBeGreaterThanOrEqual(1);
-      expect(results.some((m) => m.subject === "Second Test Email")).toBe(true);
+      expect(results.some((m) => m.subject === SUBJECTS.second)).toBe(true);
     });
 
     it("should search by from address", async () => {
@@ -197,61 +219,48 @@ describe("Email Integration Tests (GreenMail)", () => {
 
   describe("Moving messages", () => {
     it("should move a message to a different folder", async () => {
-      // Get the second message UID
-      const messages = await imapClient.listMessages("INBOX", 10, 0);
-      const secondMsg = messages.find(
-        (m) => m.subject === "Second Test Email",
-      );
+      const messages = await imapClient.listMessages("INBOX", 50, 0);
+      const secondMsg = messages.find((m) => m.subject === SUBJECTS.second);
       expect(secondMsg).toBeDefined();
 
-      // Move it to Sent folder (GreenMail will auto-create folders)
       await imapClient.moveMessage("INBOX", secondMsg!.uid, "Sent");
 
-      // Verify it's no longer in INBOX
-      const inboxAfter = await imapClient.listMessages("INBOX", 10, 0);
-      const stillInInbox = inboxAfter.find(
-        (m) => m.subject === "Second Test Email",
-      );
+      const inboxAfter = await imapClient.listMessages("INBOX", 50, 0);
+      const stillInInbox = inboxAfter.find((m) => m.subject === SUBJECTS.second);
       expect(stillInInbox).toBeUndefined();
 
-      // Verify it's in the Sent folder
-      const sentMessages = await imapClient.listMessages("Sent", 10, 0);
-      const inSent = sentMessages.find(
-        (m) => m.subject === "Second Test Email",
-      );
+      const sentMessages = await imapClient.listMessages("Sent", 50, 0);
+      const inSent = sentMessages.find((m) => m.subject === SUBJECTS.second);
       expect(inSent).toBeDefined();
     });
   });
 
   describe("Deleting messages", () => {
     it("should move a message to Trash when deleting from INBOX", async () => {
-      const messages = await imapClient.listMessages("INBOX", 10, 0);
-      const deleteMsg = messages.find((m) => m.subject === "Delete Me");
+      const messages = await imapClient.listMessages("INBOX", 50, 0);
+      const deleteMsg = messages.find((m) => m.subject === SUBJECTS.delete);
       expect(deleteMsg).toBeDefined();
 
       await imapClient.deleteMessage("INBOX", deleteMsg!.uid);
 
-      // Verify it's no longer in INBOX
-      const inboxAfter = await imapClient.listMessages("INBOX", 10, 0);
-      const stillInInbox = inboxAfter.find((m) => m.subject === "Delete Me");
+      const inboxAfter = await imapClient.listMessages("INBOX", 50, 0);
+      const stillInInbox = inboxAfter.find((m) => m.subject === SUBJECTS.delete);
       expect(stillInInbox).toBeUndefined();
 
-      // Verify it's in Trash
-      const trashMessages = await imapClient.listMessages("Trash", 10, 0);
-      const inTrash = trashMessages.find((m) => m.subject === "Delete Me");
+      const trashMessages = await imapClient.listMessages("Trash", 50, 0);
+      const inTrash = trashMessages.find((m) => m.subject === SUBJECTS.delete);
       expect(inTrash).toBeDefined();
     });
 
     it("should permanently delete a message from Trash", async () => {
-      const trashMessages = await imapClient.listMessages("Trash", 10, 0);
-      const deleteMsg = trashMessages.find((m) => m.subject === "Delete Me");
+      const trashMessages = await imapClient.listMessages("Trash", 50, 0);
+      const deleteMsg = trashMessages.find((m) => m.subject === SUBJECTS.delete);
       expect(deleteMsg).toBeDefined();
 
       await imapClient.deleteMessage("Trash", deleteMsg!.uid);
 
-      // Verify it's gone from Trash
-      const trashAfter = await imapClient.listMessages("Trash", 10, 0);
-      const stillInTrash = trashAfter.find((m) => m.subject === "Delete Me");
+      const trashAfter = await imapClient.listMessages("Trash", 50, 0);
+      const stillInTrash = trashAfter.find((m) => m.subject === SUBJECTS.delete);
       expect(stillInTrash).toBeUndefined();
     });
   });
@@ -269,17 +278,13 @@ describe("Email Integration Tests (GreenMail)", () => {
       expect(messageId).toBeDefined();
       expect(typeof messageId).toBe("string");
 
-      // Wait for delivery
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const expectedSubject = `Re: ${SUBJECTS.first}`;
+      await pollForMessage(imapClient, "INBOX", (s) => s === expectedSubject);
 
-      // Find the reply in INBOX
-      const messages = await imapClient.listMessages("INBOX", 10, 0);
-      const reply = messages.find(
-        (m) => m.subject === "Re: Integration Test Email",
-      );
+      const messages = await imapClient.listMessages("INBOX", 50, 0);
+      const reply = messages.find((m) => m.subject === expectedSubject);
       expect(reply).toBeDefined();
 
-      // Verify reply threading
       const fullReply = await imapClient.getMessage("INBOX", reply!.uid);
       expect(fullReply.inReplyTo).toBeDefined();
       expect(fullReply.body).toContain(
@@ -293,7 +298,7 @@ describe("Email Integration Tests (GreenMail)", () => {
       const messageId = await smtpClient.forwardMessage(
         "INBOX",
         sentMessageUid,
-        "test@localhost.com",
+        testConfig.auth.user,
         { body: "FYI - forwarding this to you." },
         imapClient,
       );
@@ -301,17 +306,13 @@ describe("Email Integration Tests (GreenMail)", () => {
       expect(messageId).toBeDefined();
       expect(typeof messageId).toBe("string");
 
-      // Wait for delivery
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const expectedSubject = `Fwd: ${SUBJECTS.first}`;
+      await pollForMessage(imapClient, "INBOX", (s) => s === expectedSubject);
 
-      // Find the forward in INBOX
-      const messages = await imapClient.listMessages("INBOX", 10, 0);
-      const forward = messages.find(
-        (m) => m.subject === "Fwd: Integration Test Email",
-      );
+      const messages = await imapClient.listMessages("INBOX", 50, 0);
+      const forward = messages.find((m) => m.subject === expectedSubject);
       expect(forward).toBeDefined();
 
-      // Verify forward content
       const fullForward = await imapClient.getMessage("INBOX", forward!.uid);
       expect(fullForward.body).toContain("FYI - forwarding this to you.");
       expect(fullForward.body).toContain("Forwarded message");
