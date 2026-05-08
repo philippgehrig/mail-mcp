@@ -2,5 +2,6 @@
 set -e
 
 cd "$(dirname "$0")/../.."
-npm ci --omit=dev
+npm install
 npm run build
+npm prune --omit=dev

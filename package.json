@@ -13,6 +13,7 @@
     "src",
     ".claude-plugin",
     ".mcp.json",
+    "package-lock.json",
     "README.md",
     "LICENSE"
   ],
@@ -22,6 +23,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts"
