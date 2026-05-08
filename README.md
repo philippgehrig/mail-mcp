@@ -32,8 +32,8 @@ Set the following environment variables:
 | `MAIL_FROM` | No | `MAIL_USER` | From address for outgoing mail |
 | `SENT_FOLDER` | No | `send-via-mcp` | Folder name to append sent messages to |
 | `TRASH_FOLDER` | No | auto-detect | Trash folder name (auto-detects via SPECIAL-USE) |
-| `ATTACHMENTS_DIR` | No | — | Directory to allow attachments from |
-| `ALLOW_UNRESTRICTED_ATTACHMENTS` | No | `false` | Set `true` to allow attachments from any path |
+| `ATTACHMENTS_DIR` | No | — | Directory to allow local file attachments from |
+| `ALLOW_UNRESTRICTED_ATTACHMENTS` | No | `false` | Set `true` to allow local file attachments from any path |
 
 ## Claude Code MCP Configuration
 
@@ -86,16 +86,18 @@ Once configured, you can ask Claude things like:
 
 ## Security
 
-**Attachment policy:** By default, sending attachments is disabled. To allow attachments:
+**Local file attachments:** By default, attaching local files via `send_message` is disabled. To enable:
 
 1. Set `ATTACHMENTS_DIR` to a specific directory — only files within that directory (after symlink resolution) can be attached
 2. Or set `ALLOW_UNRESTRICTED_ATTACHMENTS=true` to attach files from any path
 
-The server validates attachment paths against directory traversal attacks by resolving symlinks and checking the real path is within the allowed directory.
+This restriction applies to local file paths passed to `send_message`. Forwarding emails (`forward_message`) re-attaches the original message's attachments from the mail server directly — no local file access is involved.
+
+The server validates local attachment paths against directory traversal attacks by resolving symlinks and checking the real path is within the allowed directory.
 
 **Credentials:** Use app-specific passwords where possible. Never commit credentials to version control — use environment variables or a secrets manager.
 
-**Transport:** IMAP connects with TLS (port 993 default). SMTP uses STARTTLS (port 587) or implicit TLS (port 465, auto-detected from port number).
+**Transport:** IMAP uses implicit TLS on port 993 (default) or plain connections on other ports. SMTP uses implicit TLS on port 465, or opportunistic STARTTLS on port 587 (default) — the server does not enforce TLS on 587, so ensure your provider supports STARTTLS.
 
 ## Development
 
@@ -114,6 +116,13 @@ docker compose -f tests/integration/docker-compose.yml down
 # Type check
 npx tsc --noEmit
 ```
+
+## Contributing
+
+1. Fork the repository and create a feature branch
+2. Make your changes and ensure tests pass (`npm test && npx tsc --noEmit`)
+3. Add tests for new functionality
+4. Submit a pull request targeting `main`
 
 ## License
 
