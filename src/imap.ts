@@ -18,7 +18,7 @@ export class ImapClient {
     this.client = new ImapFlow({
       host: config.imap.host,
       port: config.imap.port,
-      secure: true,
+      secure: config.imap.port === 993,
       auth: {
         user: config.auth.user,
         pass: config.auth.pass,
