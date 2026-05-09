@@ -118,6 +118,8 @@ export class ImapClient {
       if (query.before) criteria.before = new Date(query.before as string);
       if (query.flagged !== undefined) criteria.flagged = query.flagged as boolean;
       if (query.unseen !== undefined) criteria.seen = !(query.unseen as boolean);
+      if (query.keyword) criteria.keyword = query.keyword as string;
+      if (query.withoutKeyword) criteria.unkeyword = query.withoutKeyword as string;
 
       const uids = await this.client.search(criteria, { uid: true });
       if (!uids || uids.length === 0) return [];
@@ -336,6 +338,24 @@ export class ImapClient {
       } else if (flags.flagged === false) {
         await this.client.messageFlagsRemove(uid.toString(), ["\\Flagged"], { uid: true });
       }
+    } finally {
+      lock.release();
+    }
+  }
+
+  async addKeyword(folder: string, uid: number, keyword: string): Promise<void> {
+    const lock = await this.client.getMailboxLock(folder);
+    try {
+      await this.client.messageFlagsAdd(uid.toString(), [keyword], { uid: true });
+    } finally {
+      lock.release();
+    }
+  }
+
+  async removeKeyword(folder: string, uid: number, keyword: string): Promise<void> {
+    const lock = await this.client.getMailboxLock(folder);
+    try {
+      await this.client.messageFlagsRemove(uid.toString(), [keyword], { uid: true });
     } finally {
       lock.release();
     }

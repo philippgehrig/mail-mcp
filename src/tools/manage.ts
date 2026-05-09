@@ -60,17 +60,29 @@ export function registerManageTools(
   server.registerTool(
     "mark_message",
     {
-      description: "Set or unset message flags (seen, flagged)",
+      description: "Set or unset message flags (seen, flagged) and manage custom keywords",
       inputSchema: {
         folder: z.string().describe("Folder path"),
         uid: z.number().describe("Message UID"),
         seen: z.boolean().optional().describe("Mark as read/unread"),
         flagged: z.boolean().optional().describe("Mark as flagged/unflagged"),
+        addKeywords: z.array(z.string()).optional().describe("Keywords to add"),
+        removeKeywords: z.array(z.string()).optional().describe("Keywords to remove"),
       },
     },
-    async ({ folder, uid, seen, flagged }) => {
+    async ({ folder, uid, seen, flagged, addKeywords, removeKeywords }) => {
       try {
         await imapClient.markMessage(folder, uid, { seen, flagged });
+        if (addKeywords?.length) {
+          for (const kw of addKeywords) {
+            await imapClient.addKeyword(folder, uid, kw);
+          }
+        }
+        if (removeKeywords?.length) {
+          for (const kw of removeKeywords) {
+            await imapClient.removeKeyword(folder, uid, kw);
+          }
+        }
         return {
           content: [{ type: "text", text: `Message ${uid} flags updated` }],
         };

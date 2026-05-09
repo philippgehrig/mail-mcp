@@ -56,6 +56,8 @@ export function registerMessageTools(
           .describe("Messages before date (ISO 8601)"),
         flagged: z.boolean().optional().describe("Filter by flagged status"),
         unseen: z.boolean().optional().describe("Filter by unread status"),
+        keyword: z.string().optional().describe("Filter by IMAP keyword"),
+        withoutKeyword: z.string().optional().describe("Exclude messages with this keyword"),
       },
     },
     async ({ folder, ...query }) => {
