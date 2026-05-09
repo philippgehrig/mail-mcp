@@ -286,6 +286,7 @@ export class ImapClient {
     uid: number,
     destination: string,
   ): Promise<void> {
+    await this.ensureFolderExists(destination);
     const lock = await this.client.getMailboxLock(folder);
     try {
       await this.client.messageMove(uid.toString(), destination, { uid: true });
