@@ -16,6 +16,7 @@ export interface Config {
   trashFolder: string | null;
   attachmentsDir: string | null;
   allowUnrestrictedAttachments: boolean;
+  tlsRejectUnauthorized: boolean;
 }
 
 export function loadConfig(): Config {
@@ -63,5 +64,7 @@ export function loadConfig(): Config {
     attachmentsDir: process.env.ATTACHMENTS_DIR || null,
     allowUnrestrictedAttachments:
       process.env.ALLOW_UNRESTRICTED_ATTACHMENTS === "true",
+    tlsRejectUnauthorized:
+      process.env.TLS_REJECT_UNAUTHORIZED !== "false",
   };
 }

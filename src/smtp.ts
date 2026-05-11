@@ -25,6 +25,9 @@ export class SmtpClient {
           user: this.config.auth.user,
           pass: this.config.auth.pass,
         },
+        tls: {
+          rejectUnauthorized: this.config.tlsRejectUnauthorized,
+        },
       });
       console.error(`SMTP transport created: ${this.config.smtp.host}`);
     }

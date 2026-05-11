@@ -25,6 +25,9 @@ export class ImapClient {
       },
       logger: false,
       disableCompression: true,
+      tls: {
+        rejectUnauthorized: config.tlsRejectUnauthorized,
+      },
     });
   }
 
