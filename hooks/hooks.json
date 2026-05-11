@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" && ([ -d dist ] || (npm install --ignore-scripts && npm run build && npm prune --omit=dev))"
+          }
+        ]
+      }
+    ]
+  }
+}
