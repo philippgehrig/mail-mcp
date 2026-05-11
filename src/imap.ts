@@ -15,20 +15,30 @@ export class ImapClient {
 
   constructor(config: Config) {
     this.config = config;
-    this.client = new ImapFlow({
-      host: config.imap.host,
-      port: config.imap.port,
-      secure: config.imap.port === 993,
+    this.client = this.createClient();
+  }
+
+  private createClient(): ImapFlow {
+    const client = new ImapFlow({
+      host: this.config.imap.host,
+      port: this.config.imap.port,
+      secure: this.config.imap.port === 993,
       auth: {
-        user: config.auth.user,
-        pass: config.auth.pass,
+        user: this.config.auth.user,
+        pass: this.config.auth.pass,
       },
       logger: false,
       disableCompression: true,
       tls: {
-        rejectUnauthorized: config.tlsRejectUnauthorized,
+        rejectUnauthorized: this.config.tlsRejectUnauthorized,
       },
     });
+
+    client.on("error", (err: Error) => {
+      console.error(`IMAP connection error: ${err.message}`);
+    });
+
+    return client;
   }
 
   async connect(): Promise<void> {
@@ -36,18 +46,52 @@ export class ImapClient {
     console.error(`Connected to IMAP: ${this.config.imap.host}`);
   }
 
+  async reconnect(): Promise<void> {
+    try {
+      await this.client.logout();
+    } catch {
+      // ignore logout errors on dead connections
+    }
+    this.client = this.createClient();
+    await this.client.connect();
+    console.error(`Reconnected to IMAP: ${this.config.imap.host}`);
+  }
+
   async disconnect(): Promise<void> {
     await this.client.logout();
   }
 
+  private isConnectionError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    const msg = err.message.toLowerCase();
+    return msg.includes("timeout") || msg.includes("closed") ||
+      msg.includes("disconnected") || msg.includes("not connected") ||
+      (err as { code?: string }).code === "ETIMEOUT";
+  }
+
+  private async withReconnect<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (err) {
+      if (this.isConnectionError(err)) {
+        console.error("Connection lost, reconnecting...");
+        await this.reconnect();
+        return await operation();
+      }
+      throw err;
+    }
+  }
+
   async listFolders(): Promise<FolderInfo[]> {
-    const list = await this.client.list({ statusQuery: { messages: true } });
-    return list.map((folder) => ({
-      name: folder.name,
-      path: folder.path,
-      delimiter: folder.delimiter || "/",
-      count: folder.status?.messages ?? 0,
-    }));
+    return this.withReconnect(async () => {
+      const list = await this.client.list({ statusQuery: { messages: true } });
+      return list.map((folder) => ({
+        name: folder.name,
+        path: folder.path,
+        delimiter: folder.delimiter || "/",
+        count: folder.status?.messages ?? 0,
+      }));
+    });
   }
 
   async listMessages(
@@ -55,110 +99,115 @@ export class ImapClient {
     limit: number,
     offset: number,
   ): Promise<MessageSummary[]> {
-    const safeLimit = Math.max(1, limit);
-    const safeOffset = Math.max(0, offset);
+    return this.withReconnect(async () => {
+      const safeLimit = Math.max(1, limit);
+      const safeOffset = Math.max(0, offset);
 
-    const lock = await this.client.getMailboxLock(folder);
-    try {
-      const mailbox = this.client.mailbox;
-      const total = mailbox ? mailbox.exists : 0;
-      if (total === 0) return [];
+      const lock = await this.client.getMailboxLock(folder);
+      try {
+        const mailbox = this.client.mailbox;
+        const total = mailbox ? mailbox.exists : 0;
+        if (total === 0) return [];
 
-      // Use UID-based pagination: search all UIDs, sort descending, slice
-      const allUids = await this.client.search({ all: true }, { uid: true });
-      if (!allUids || allUids.length === 0) return [];
+        // Use UID-based pagination: search all UIDs, sort descending, slice
+        const allUids = await this.client.search({ all: true }, { uid: true });
+        if (!allUids || allUids.length === 0) return [];
 
-      // Sort descending (newest first) and paginate
-      allUids.sort((a, b) => b - a);
-      const paged = allUids.slice(safeOffset, safeOffset + safeLimit);
-      if (paged.length === 0) return [];
+        // Sort descending (newest first) and paginate
+        allUids.sort((a, b) => b - a);
+        const paged = allUids.slice(safeOffset, safeOffset + safeLimit);
+        if (paged.length === 0) return [];
 
-      const uidRange = paged.join(",");
-      const messages: MessageSummary[] = [];
+        const uidRange = paged.join(",");
+        const messages: MessageSummary[] = [];
 
-      for await (const msg of this.client.fetch(uidRange, {
-        uid: true,
-        flags: true,
-        envelope: true,
-        bodyStructure: true,
-      }, { uid: true })) {
-        const envelope = msg.envelope;
-        const from = envelope?.from?.[0];
-        const to = envelope?.to?.[0];
-        messages.push({
-          uid: msg.uid,
-          subject: envelope?.subject || "",
-          from: from ? (from.name ? `${from.name} <${from.address}>` : from.address || "") : "",
-          to: to ? (to.name ? `${to.name} <${to.address}>` : to.address || "") : "",
-          date: envelope?.date?.toISOString() || "",
-          flags: Array.from(msg.flags || []),
-          hasAttachments: this.hasAttachments(msg.bodyStructure),
-        });
+        for await (const msg of this.client.fetch(uidRange, {
+          uid: true,
+          flags: true,
+          envelope: true,
+          bodyStructure: true,
+        }, { uid: true })) {
+          const envelope = msg.envelope;
+          const from = envelope?.from?.[0];
+          const to = envelope?.to?.[0];
+          messages.push({
+            uid: msg.uid,
+            subject: envelope?.subject || "",
+            from: from ? (from.name ? `${from.name} <${from.address}>` : from.address || "") : "",
+            to: to ? (to.name ? `${to.name} <${to.address}>` : to.address || "") : "",
+            date: envelope?.date?.toISOString() || "",
+            flags: Array.from(msg.flags || []),
+            hasAttachments: this.hasAttachments(msg.bodyStructure),
+          });
+        }
+
+        // Sort by UID descending (newest first)
+        messages.sort((a, b) => b.uid - a.uid);
+        return messages;
+      } finally {
+        lock.release();
       }
-
-      // Sort by UID descending (newest first)
-      messages.sort((a, b) => b.uid - a.uid);
-      return messages;
-    } finally {
-      lock.release();
-    }
+    });
   }
 
   async searchMessages(
     folder: string,
     query: Record<string, unknown>,
   ): Promise<MessageSummary[]> {
-    const lock = await this.client.getMailboxLock(folder);
-    try {
-      // Translate query fields to imapflow SearchObject
-      const criteria: Record<string, unknown> = {};
+    return this.withReconnect(async () => {
+      const lock = await this.client.getMailboxLock(folder);
+      try {
+        // Translate query fields to imapflow SearchObject
+        const criteria: Record<string, unknown> = {};
 
-      if (query.from) criteria.from = query.from as string;
-      if (query.to) criteria.to = query.to as string;
-      if (query.subject) criteria.subject = query.subject as string;
-      if (query.body) criteria.body = query.body as string;
-      if (query.since) criteria.since = new Date(query.since as string);
-      if (query.before) criteria.before = new Date(query.before as string);
-      if (query.flagged !== undefined) criteria.flagged = query.flagged as boolean;
-      if (query.unseen !== undefined) criteria.seen = !(query.unseen as boolean);
-      if (query.keyword) criteria.keyword = query.keyword as string;
-      if (query.withoutKeyword) criteria.unkeyword = query.withoutKeyword as string;
+        if (query.from) criteria.from = query.from as string;
+        if (query.to) criteria.to = query.to as string;
+        if (query.subject) criteria.subject = query.subject as string;
+        if (query.body) criteria.body = query.body as string;
+        if (query.since) criteria.since = new Date(query.since as string);
+        if (query.before) criteria.before = new Date(query.before as string);
+        if (query.flagged !== undefined) criteria.flagged = query.flagged as boolean;
+        if (query.unseen !== undefined) criteria.seen = !(query.unseen as boolean);
+        if (query.keyword) criteria.keyword = query.keyword as string;
+        if (query.withoutKeyword) criteria.unkeyword = query.withoutKeyword as string;
 
-      const uids = await this.client.search(criteria, { uid: true });
-      if (!uids || uids.length === 0) return [];
+        const uids = await this.client.search(criteria, { uid: true });
+        if (!uids || uids.length === 0) return [];
 
-      const uidRange = uids.join(",");
-      const messages: MessageSummary[] = [];
+        const uidRange = uids.join(",");
+        const messages: MessageSummary[] = [];
 
-      for await (const msg of this.client.fetch(uidRange, {
-        uid: true,
-        flags: true,
-        envelope: true,
-        bodyStructure: true,
-      }, { uid: true })) {
-        const envelope = msg.envelope;
-        const from = envelope?.from?.[0];
-        const to = envelope?.to?.[0];
-        messages.push({
-          uid: msg.uid,
-          subject: envelope?.subject || "",
-          from: from ? (from.name ? `${from.name} <${from.address}>` : from.address || "") : "",
-          to: to ? (to.name ? `${to.name} <${to.address}>` : to.address || "") : "",
-          date: envelope?.date?.toISOString() || "",
-          flags: Array.from(msg.flags || []),
-          hasAttachments: this.hasAttachments(msg.bodyStructure),
-        });
+        for await (const msg of this.client.fetch(uidRange, {
+          uid: true,
+          flags: true,
+          envelope: true,
+          bodyStructure: true,
+        }, { uid: true })) {
+          const envelope = msg.envelope;
+          const from = envelope?.from?.[0];
+          const to = envelope?.to?.[0];
+          messages.push({
+            uid: msg.uid,
+            subject: envelope?.subject || "",
+            from: from ? (from.name ? `${from.name} <${from.address}>` : from.address || "") : "",
+            to: to ? (to.name ? `${to.name} <${to.address}>` : to.address || "") : "",
+            date: envelope?.date?.toISOString() || "",
+            flags: Array.from(msg.flags || []),
+            hasAttachments: this.hasAttachments(msg.bodyStructure),
+          });
+        }
+
+        // Return newest first
+        messages.reverse();
+        return messages;
+      } finally {
+        lock.release();
       }
-
-      // Return newest first
-      messages.reverse();
-      return messages;
-    } finally {
-      lock.release();
-    }
+    });
   }
 
   async getMessage(folder: string, uid: number): Promise<FullMessage> {
+    return this.withReconnect(async () => {
     const lock = await this.client.getMailboxLock(folder);
     try {
       // Get flags and bodyStructure first
@@ -256,6 +305,7 @@ export class ImapClient {
     } finally {
       lock.release();
     }
+    });
   }
 
   async getAttachment(
@@ -263,25 +313,27 @@ export class ImapClient {
     uid: number,
     partId: string,
   ): Promise<AttachmentContent> {
-    const lock = await this.client.getMailboxLock(folder);
-    try {
-      const { content, meta } = await this.client.download(uid.toString(), partId, { uid: true });
+    return this.withReconnect(async () => {
+      const lock = await this.client.getMailboxLock(folder);
+      try {
+        const { content, meta } = await this.client.download(uid.toString(), partId, { uid: true });
 
-      // Collect stream into buffer
-      const chunks: Buffer[] = [];
-      for await (const chunk of content) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        // Collect stream into buffer
+        const chunks: Buffer[] = [];
+        for await (const chunk of content) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const data = Buffer.concat(chunks);
+
+        return {
+          filename: meta.filename || "unnamed",
+          contentType: meta.contentType || "application/octet-stream",
+          content: data.toString("base64"),
+        };
+      } finally {
+        lock.release();
       }
-      const data = Buffer.concat(chunks);
-
-      return {
-        filename: meta.filename || "unnamed",
-        contentType: meta.contentType || "application/octet-stream",
-        content: data.toString("base64"),
-      };
-    } finally {
-      lock.release();
-    }
+    });
   }
 
   async moveMessage(
@@ -289,31 +341,41 @@ export class ImapClient {
     uid: number,
     destination: string,
   ): Promise<void> {
-    await this.ensureFolderExists(destination);
-    const lock = await this.client.getMailboxLock(folder);
-    try {
-      await this.client.messageMove(uid.toString(), destination, { uid: true });
-    } finally {
-      lock.release();
-    }
-  }
-
-  async deleteMessage(folder: string, uid: number): Promise<void> {
-    const trashFolder = await this.getTrashFolder();
-    const isInTrash = folder.toLowerCase() === trashFolder.toLowerCase() || folder === trashFolder;
-
-    if (isInTrash) {
-      // Permanently delete (UID EXPUNGE)
+    return this.withReconnect(async () => {
+      await this.ensureFolderExists(destination);
       const lock = await this.client.getMailboxLock(folder);
       try {
-        await this.client.messageDelete(uid.toString(), { uid: true });
+        await this.client.messageMove(uid.toString(), destination, { uid: true });
       } finally {
         lock.release();
       }
-    } else {
-      await this.ensureFolderExists(trashFolder);
-      await this.moveMessage(folder, uid, trashFolder);
-    }
+    });
+  }
+
+  async deleteMessage(folder: string, uid: number): Promise<void> {
+    return this.withReconnect(async () => {
+      const trashFolder = await this.getTrashFolder();
+      const isInTrash = folder.toLowerCase() === trashFolder.toLowerCase() || folder === trashFolder;
+
+      if (isInTrash) {
+        const lock = await this.client.getMailboxLock(folder);
+        try {
+          await this.client.messageDelete(uid.toString(), { uid: true });
+        } finally {
+          lock.release();
+        }
+      } else {
+        await this.ensureFolderExists(trashFolder);
+        // Call moveMessage internals directly to avoid double-reconnect
+        await this.ensureFolderExists(trashFolder);
+        const lock = await this.client.getMailboxLock(folder);
+        try {
+          await this.client.messageMove(uid.toString(), trashFolder, { uid: true });
+        } finally {
+          lock.release();
+        }
+      }
+    });
   }
 
   private async ensureFolderExists(folderPath: string): Promise<void> {
@@ -329,40 +391,46 @@ export class ImapClient {
     uid: number,
     flags: { seen?: boolean; flagged?: boolean },
   ): Promise<void> {
-    const lock = await this.client.getMailboxLock(folder);
-    try {
-      if (flags.seen === true) {
-        await this.client.messageFlagsAdd(uid.toString(), ["\\Seen"], { uid: true });
-      } else if (flags.seen === false) {
-        await this.client.messageFlagsRemove(uid.toString(), ["\\Seen"], { uid: true });
-      }
+    return this.withReconnect(async () => {
+      const lock = await this.client.getMailboxLock(folder);
+      try {
+        if (flags.seen === true) {
+          await this.client.messageFlagsAdd(uid.toString(), ["\\Seen"], { uid: true });
+        } else if (flags.seen === false) {
+          await this.client.messageFlagsRemove(uid.toString(), ["\\Seen"], { uid: true });
+        }
 
-      if (flags.flagged === true) {
-        await this.client.messageFlagsAdd(uid.toString(), ["\\Flagged"], { uid: true });
-      } else if (flags.flagged === false) {
-        await this.client.messageFlagsRemove(uid.toString(), ["\\Flagged"], { uid: true });
+        if (flags.flagged === true) {
+          await this.client.messageFlagsAdd(uid.toString(), ["\\Flagged"], { uid: true });
+        } else if (flags.flagged === false) {
+          await this.client.messageFlagsRemove(uid.toString(), ["\\Flagged"], { uid: true });
+        }
+      } finally {
+        lock.release();
       }
-    } finally {
-      lock.release();
-    }
+    });
   }
 
   async addKeyword(folder: string, uid: number, keyword: string): Promise<void> {
-    const lock = await this.client.getMailboxLock(folder);
-    try {
-      await this.client.messageFlagsAdd(uid.toString(), [keyword], { uid: true });
-    } finally {
-      lock.release();
-    }
+    return this.withReconnect(async () => {
+      const lock = await this.client.getMailboxLock(folder);
+      try {
+        await this.client.messageFlagsAdd(uid.toString(), [keyword], { uid: true });
+      } finally {
+        lock.release();
+      }
+    });
   }
 
   async removeKeyword(folder: string, uid: number, keyword: string): Promise<void> {
-    const lock = await this.client.getMailboxLock(folder);
-    try {
-      await this.client.messageFlagsRemove(uid.toString(), [keyword], { uid: true });
-    } finally {
-      lock.release();
-    }
+    return this.withReconnect(async () => {
+      const lock = await this.client.getMailboxLock(folder);
+      try {
+        await this.client.messageFlagsRemove(uid.toString(), [keyword], { uid: true });
+      } finally {
+        lock.release();
+      }
+    });
   }
 
   async getTrashFolder(): Promise<string> {
