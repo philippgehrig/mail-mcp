@@ -8,7 +8,6 @@
   },
   "repository": "https://github.com/philippgehrig/mail-mcp",
   "license": "MIT",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "mail",
     "email",
