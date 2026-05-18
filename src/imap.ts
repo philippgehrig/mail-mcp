@@ -65,13 +65,25 @@ export class ImapClient {
         await this.client.connect();
         return;
       } catch (err) {
-        if (attempt === maxAttempts) throw err;
+        if (attempt === maxAttempts || !this.isTransientError(err)) throw err;
         const delay = baseDelay * Math.pow(2, attempt - 1);
         console.error(`Connection attempt ${attempt} failed, retrying in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         this.client = this.createClient();
       }
     }
+  }
+
+  private isTransientError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    const code = (err as { code?: string }).code;
+    const nonTransient = ["AUTHENTICATIONFAILED", "ENOTFOUND", "ERR_INVALID_ARG_TYPE"];
+    if (code && nonTransient.includes(code)) return false;
+    const msg = err.message.toLowerCase();
+    if (msg.includes("authentication") || msg.includes("invalid credentials") || msg.includes("login failed")) {
+      return false;
+    }
+    return true;
   }
 
   async disconnect(): Promise<void> {
