@@ -7,6 +7,8 @@ const mockLock = { release: vi.fn() };
 const mockClient = {
   connect: vi.fn(),
   logout: vi.fn(),
+  close: vi.fn(),
+  on: vi.fn(),
   list: vi.fn(),
   getMailboxLock: vi.fn().mockResolvedValue(mockLock),
   messageMove: vi.fn(),
