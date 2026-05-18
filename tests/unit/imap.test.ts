@@ -7,6 +7,8 @@ const mockLock = { release: vi.fn() };
 const mockClient = {
   connect: vi.fn(),
   logout: vi.fn(),
+  close: vi.fn(),
+  on: vi.fn(),
   list: vi.fn(),
   getMailboxLock: vi.fn().mockResolvedValue(mockLock),
   messageMove: vi.fn(),
@@ -277,6 +279,73 @@ describe("ImapClient", () => {
 
       const messages = await client.listMessages("INBOX", 10, 0);
       expect(messages).toEqual([]);
+    });
+  });
+
+  describe("isConnectionError detection", () => {
+    it("reconnects on NoConnection error code", async () => {
+      const err = new Error("Connection not available");
+      (err as { code?: string }).code = "NoConnection";
+      mockClient.list.mockRejectedValueOnce(err);
+      mockClient.list.mockResolvedValueOnce([
+        { name: "INBOX", path: "INBOX", delimiter: "/", status: { messages: 1 } },
+      ]);
+
+      const folders = await client.listFolders();
+      expect(folders).toHaveLength(1);
+      expect(mockClient.connect).toHaveBeenCalled();
+    });
+
+    it("reconnects on EConnectionClosed error code", async () => {
+      const err = new Error("Connection closed");
+      (err as { code?: string }).code = "EConnectionClosed";
+      mockClient.list.mockRejectedValueOnce(err);
+      mockClient.list.mockResolvedValueOnce([
+        { name: "INBOX", path: "INBOX", delimiter: "/", status: { messages: 0 } },
+      ]);
+
+      const folders = await client.listFolders();
+      expect(folders).toHaveLength(1);
+    });
+
+    it("reconnects on 'not available' message", async () => {
+      mockClient.list.mockRejectedValueOnce(new Error("Connection not available"));
+      mockClient.list.mockResolvedValueOnce([
+        { name: "INBOX", path: "INBOX", delimiter: "/", status: { messages: 0 } },
+      ]);
+
+      const folders = await client.listFolders();
+      expect(folders).toHaveLength(1);
+    });
+
+    it("does not reconnect on non-connection errors", async () => {
+      mockClient.list.mockRejectedValueOnce(new Error("Mailbox does not exist"));
+
+      await expect(client.listFolders()).rejects.toThrow("Mailbox does not exist");
+    });
+  });
+
+  describe("connectWithRetry", () => {
+    it("does not retry on authentication errors", async () => {
+      const err = new Error("Authentication failed");
+      (err as { code?: string }).code = "AUTHENTICATIONFAILED";
+      mockClient.connect.mockRejectedValue(err);
+
+      const newClient = new ImapClient({ ...baseConfig });
+      await expect(newClient.connect()).rejects.toThrow("Authentication failed");
+      expect(mockClient.connect).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries on transient connection errors", async () => {
+      const err = new Error("Socket timeout");
+      (err as { code?: string }).code = "ETIMEOUT";
+      mockClient.connect
+        .mockRejectedValueOnce(err)
+        .mockResolvedValueOnce(undefined);
+
+      const newClient = new ImapClient({ ...baseConfig });
+      await newClient.connect();
+      expect(mockClient.connect).toHaveBeenCalledTimes(2);
     });
   });
 });

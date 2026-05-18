@@ -42,19 +42,48 @@ export class ImapClient {
   }
 
   async connect(): Promise<void> {
-    await this.client.connect();
+    await this.connectWithRetry();
     console.error(`Connected to IMAP: ${this.config.imap.host}`);
   }
 
   async reconnect(): Promise<void> {
     try {
-      await this.client.logout();
+      this.client.close();
     } catch {
-      // ignore logout errors on dead connections
+      // ignore close errors on dead connections
     }
     this.client = this.createClient();
-    await this.client.connect();
+    await this.connectWithRetry();
     console.error(`Reconnected to IMAP: ${this.config.imap.host}`);
+  }
+
+  private async connectWithRetry(): Promise<void> {
+    const maxAttempts = 3;
+    const baseDelay = 1000;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.client.connect();
+        return;
+      } catch (err) {
+        if (attempt === maxAttempts || !this.isTransientError(err)) throw err;
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        console.error(`Connection attempt ${attempt} failed, retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        this.client = this.createClient();
+      }
+    }
+  }
+
+  private isTransientError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    const code = (err as { code?: string }).code;
+    const nonTransient = ["AUTHENTICATIONFAILED", "ENOTFOUND", "ERR_INVALID_ARG_TYPE"];
+    if (code && nonTransient.includes(code)) return false;
+    const msg = err.message.toLowerCase();
+    if (msg.includes("authentication") || msg.includes("invalid credentials") || msg.includes("login failed")) {
+      return false;
+    }
+    return true;
   }
 
   async disconnect(): Promise<void> {
@@ -63,10 +92,14 @@ export class ImapClient {
 
   private isConnectionError(err: unknown): boolean {
     if (!(err instanceof Error)) return false;
+    const code = (err as { code?: string }).code;
+    if (code === "ETIMEOUT" || code === "NoConnection" || code === "EConnectionClosed") {
+      return true;
+    }
     const msg = err.message.toLowerCase();
     return msg.includes("timeout") || msg.includes("closed") ||
       msg.includes("disconnected") || msg.includes("not connected") ||
-      (err as { code?: string }).code === "ETIMEOUT";
+      msg.includes("not available");
   }
 
   private async withReconnect<T>(operation: () => Promise<T>): Promise<T> {
